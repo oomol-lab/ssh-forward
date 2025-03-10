@@ -6,19 +6,26 @@ func (e *Endpoint) String() string {
 	if e.unixSocket != "" {
 		return e.unixSocket
 	}
+
 	return fmt.Sprintf("%s:%d", e.host, e.port)
+
 }
 
 func (e *Endpoint) Type() string {
 	if e.unixSocket != "" {
 		return endpointTypeUnixSocket
 	}
-	return endpointTypeUnknow
+	if e.host != "" && e.port != 0 {
+		return endpointTypeTcp
+	}
+
+	return endpointTypeUnknown
 }
 
 const (
 	endpointTypeUnixSocket = "unix"
-	endpointTypeUnknow     = "unknow"
+	endpointTypeTcp        = "tcp"
+	endpointTypeUnknown    = "unknown"
 )
 
 type Endpoint struct {
