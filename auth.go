@@ -10,13 +10,15 @@ import (
 // SetKeyFile changes the authentication to key-based and uses the specified file.
 // Leaving the file empty defaults to the default linux private key locations: `~/.ssh/id_rsa`, `~/.ssh/id_dsa`,
 // `~/.ssh/id_ecdsa`, `~/.ssh/id_ecdsa_sk`, `~/.ssh/id_ed25519` and `~/.ssh/id_ed25519_sk`.
-func (tun *ForwardConfig) SetKeyFile(file string) {
+func (tun *ForwardConfig) SetKeyFile(file string) *ForwardConfig {
 	tun.authKeyFile = file
+	return tun
 }
 
 // SetPort changes the port where the SSH connection will be made.
-func (tun *ForwardConfig) SetPort(port int) {
+func (tun *ForwardConfig) SetPort(port int) *ForwardConfig {
 	tun.Server.port = port
+	return tun
 }
 
 func (tun *ForwardConfig) readPrivateKey(keyFile string) (ssh.AuthMethod, error) {

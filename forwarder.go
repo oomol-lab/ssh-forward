@@ -15,8 +15,9 @@ import (
 )
 
 // SetUser changes the user used to make the SSH connection.
-func (tun *ForwardConfig) SetUser(user string) {
+func (tun *ForwardConfig) SetUser(user string) *ForwardConfig {
 	tun.User = user
+	return tun
 }
 
 // SetConnState specifies an optional callback function that is called when a SSH tunnel changes state.

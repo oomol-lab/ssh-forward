@@ -17,9 +17,7 @@ func main() {
 		logrus.Infof("%v", state)
 	})
 
-	myForwarder.SetKeyFile("/Users/danhexon/.ssh/id_ed25519")
-	myForwarder.SetUser("ihexon")
-	myForwarder.SetPort(22)
+	myForwarder.SetKeyFile("/Users/danhexon/.ssh/id_ed25519").SetUser("ihexon").SetPort(22)
 
 	// We set a callback to know when the tunnel is ready
 	myForwarder.SetConnState(func(tun *forwarder.ForwardConfig, state forwarder.ConnState) {
