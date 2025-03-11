@@ -61,14 +61,14 @@ type ForwardConfig struct {
 	User              string
 	Server            *Endpoint
 	started           bool
-	local             *Endpoint
-	remote            *Endpoint
+	Local             *Endpoint
+	Remote            *Endpoint
 	forwardType       ForwardType
 	timeout           time.Duration
 	active            int
 	connState         func(*ForwardConfig, ConnState)
 	tunneledConnState func(*ForwardConfig, *TunneledConnState)
-	sshClient         *ssh.Client
-	sshConfig         *ssh.ClientConfig
+	SSHClient         *ssh.Client
+	SSHConfig         *ssh.ClientConfig
 	authKeyFile       string
 }

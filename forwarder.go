@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -31,8 +32,8 @@ func (tun *ForwardConfig) SetTunneledConnState(tunneledConnStateFun func(*Forwar
 // NewUnix does the same as New but using unix sockets.
 func NewUnix(localUnixSocket string, server string, remoteUnixSocket string) *ForwardConfig {
 	sshTun := defaultSSHTun(server)
-	sshTun.local = NewUnixEndpoint(localUnixSocket)
-	sshTun.remote = NewUnixEndpoint(remoteUnixSocket)
+	sshTun.Local = NewUnixEndpoint(localUnixSocket)
+	sshTun.Remote = NewUnixEndpoint(remoteUnixSocket)
 	return sshTun
 }
 
@@ -100,7 +101,29 @@ func (tun *ForwardConfig) stop(err error) error {
 	if tun.connState != nil {
 		tun.connState(tun, StateStopped)
 	}
+
 	return err
+}
+
+// CleanTargetSocketFile delete the target socket file before forward
+func (tun *ForwardConfig) CleanTargetSocketFile() error {
+	sshClient, err := ssh.Dial(tun.Server.Type(), tun.Server.String(), tun.SSHConfig)
+	if err != nil {
+		return fmt.Errorf("SSH Dial Error: %v", err)
+	}
+	mySession, err := sshClient.NewSession()
+	if err != nil {
+		return fmt.Errorf("SSH NewSession Error: %v", err)
+	}
+	mySession.Stdin = nil
+	rSocket := tun.Remote.String()
+
+	cmdline := fmt.Sprintf("sh -c 'mkdir -p %s && rm -f %s '", filepath.Dir(rSocket), rSocket)
+	if err = mySession.Run(cmdline); err != nil {
+		return fmt.Errorf("SSH Run Error: %v", err)
+	}
+	defer mySession.Close()
+	return nil
 }
 
 func (tun *ForwardConfig) Start(ctx context.Context) error {
@@ -113,35 +136,26 @@ func (tun *ForwardConfig) Start(ctx context.Context) error {
 	tun.ctx, tun.cancel = context.WithCancel(ctx)
 	tun.mutex.Unlock()
 
-	if tun.connState != nil {
-		tun.connState(tun, StateStarting)
-	}
-
 	config, err := tun.initSSHConfig()
 	if err != nil {
 		return tun.stop(fmt.Errorf("ssh config failed: %w", err))
 	}
-	tun.sshConfig = config
+	tun.SSHConfig = config
+
+	if tun.connState != nil {
+		tun.connState(tun, StateStarting)
+	}
 
 	var listener net.Listener
 
-	sshClient, err := ssh.Dial(tun.Server.Type(), tun.Server.String(), tun.sshConfig)
+	sshClient, err := ssh.Dial(tun.Server.Type(), tun.Server.String(), tun.SSHConfig)
 	if err != nil {
 		return tun.stop(fmt.Errorf("ssh dial %s to %s failed: %w", tun.Server.Type(), tun.Server.String(), err))
 	}
-	// We need delete remote UDF first
-	mySession, err := sshClient.NewSession()
-	if err != nil {
-		return fmt.Errorf("ssh new session %s failed: %w", tun.Server.String(), err)
-	}
-	cmdline := fmt.Sprintf("sh -c 'rm -f %s'", tun.remote.String())
-	if err = mySession.Run(cmdline); err != nil {
-		return fmt.Errorf("delete remote socket file failed: %s, %w", cmdline, err)
-	}
 
-	listener, err = sshClient.Listen(tun.remote.Type(), tun.remote.String())
+	listener, err = sshClient.Listen(tun.Remote.Type(), tun.Remote.String())
 	if err != nil {
-		return tun.stop(fmt.Errorf("remote listen %s on %s failed: %w", tun.remote.Type(), tun.remote.String(), err))
+		return tun.stop(fmt.Errorf("Remote listen %s on %s failed: %w", tun.Remote.Type(), tun.Remote.String(), err))
 	}
 
 	errChan := make(chan error)
@@ -187,17 +201,17 @@ func (tun *ForwardConfig) listen(listener net.Listener) error {
 }
 func (tun *ForwardConfig) fromEndpoint() *Endpoint {
 	if tun.forwardType == Remote {
-		return tun.remote
+		return tun.Remote
 	}
 
-	return tun.local
+	return tun.Local
 }
 
 func (tun *ForwardConfig) addConn() error {
 	tun.mutex.Lock()
 	defer tun.mutex.Unlock()
 	tun.active += 1
-	
+
 	return nil
 }
 
@@ -228,26 +242,26 @@ func (tun *ForwardConfig) tunneledState(state *TunneledConnState) {
 
 func (tun *ForwardConfig) toEndpoint() *Endpoint {
 	if tun.forwardType == Remote {
-		return tun.local
+		return tun.Local
 	}
 
-	return tun.remote
+	return tun.Remote
 }
 
 func (tun *ForwardConfig) forwardFromName() string {
 	if tun.forwardType == Remote {
-		return "remote"
+		return "Remote"
 	}
 
-	return "local"
+	return "Local"
 }
 
 func (tun *ForwardConfig) forwardToName() string {
 	if tun.forwardType == Remote {
-		return "local"
+		return "Local"
 	}
 
-	return "remote"
+	return "Remote"
 }
 
 func (tun *ForwardConfig) forward(fromConn net.Conn) {
@@ -261,7 +275,7 @@ func (tun *ForwardConfig) forward(fromConn net.Conn) {
 	var toConn net.Conn
 	var err error
 
-	dialFunc := tun.sshClient.Dial
+	dialFunc := tun.SSHClient.Dial
 	if tun.forwardType == Remote {
 		dialFunc = net.Dial
 	}
