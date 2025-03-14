@@ -1,4 +1,4 @@
-Forward UDF over SSH
+Forward unix domain socket file over SSH
 =====================
 
 Origin code from [daytona](https://github.com/daytonaio/daytona/tree/c9476324ae5cca3a8d1e772c72297de41213c83a/pkg/tailscale/tunnel)
