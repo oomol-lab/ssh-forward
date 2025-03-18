@@ -156,7 +156,7 @@ func (tun *ForwardConfig) Start(ctx context.Context) error {
 
 	listener, err = sshClient.Listen(tun.Remote.Type(), tun.Remote.String())
 	if err != nil {
-		return tun.stop(fmt.Errorf("Remote listen %s on %s failed: %w", tun.Remote.Type(), tun.Remote.String(), err))
+		return tun.stop(fmt.Errorf("remote listen %s on %s failed: %w", tun.Remote.Type(), tun.Remote.String(), err))
 	}
 
 	errChan := make(chan error)
@@ -172,34 +172,22 @@ func (tun *ForwardConfig) Start(ctx context.Context) error {
 }
 
 func (tun *ForwardConfig) listen(listener net.Listener) error {
-	errGroup, groupCtx := errgroup.WithContext(tun.ctx)
-	errGroup.Go(func() error {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return fmt.Errorf("%s accept %s on %s failed: %w", tun.forwardFromName(),
-					tun.fromEndpoint().Type(), tun.fromEndpoint().String(), err)
-			}
-			errGroup.Go(func() error {
-				return tun.handle(conn)
-			})
+	for {
+		if tun.ctx.Err() != nil {
+			return tun.ctx.Err()
 		}
-	})
 
-	<-groupCtx.Done()
+		conn, err := listener.Accept()
+		if err != nil {
+			continue
+		}
 
-	listener.Close()
-
-	err := errGroup.Wait()
-
-	select {
-	case <-tun.ctx.Done():
-	default:
-		return err
+		go func() {
+			_ = tun.handle(conn)
+		}()
 	}
-
-	return nil
 }
+
 func (tun *ForwardConfig) fromEndpoint() *Endpoint {
 	if tun.forwardType == Remote {
 		return tun.Remote
