@@ -168,8 +168,10 @@ func (tun *ForwardConfig) Start(ctx context.Context) error {
 		tun.connState(tun, StateStarted)
 	}
 
-	if err = <-errChan; err != nil {
-		_ = listener.Close()
+	select {
+	case <-tun.ctx.Done():
+		err = context.Cause(tun.ctx)
+	case err = <-errChan:
 	}
 
 	return tun.stop(err)
