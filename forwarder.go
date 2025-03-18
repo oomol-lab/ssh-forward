@@ -168,23 +168,24 @@ func (tun *ForwardConfig) Start(ctx context.Context) error {
 		tun.connState(tun, StateStarted)
 	}
 
-	return tun.stop(<-errChan)
+	if err = <-errChan; err != nil {
+		_ = listener.Close()
+	}
+
+	return tun.stop(err)
 }
 
 func (tun *ForwardConfig) listen(listener net.Listener) error {
 	for {
 		if tun.ctx.Err() != nil {
-			return tun.ctx.Err()
+			return fmt.Errorf("forward context cancelled: %w", tun.ctx.Err())
 		}
 
-		conn, err := listener.Accept()
-		if err != nil {
-			continue
+		if conn, err := listener.Accept(); err == nil {
+			go func() {
+				_ = tun.handle(conn)
+			}()
 		}
-
-		go func() {
-			_ = tun.handle(conn)
-		}()
 	}
 }
 
