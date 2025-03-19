@@ -55,7 +55,7 @@ func (s *TunneledConnState) String() string {
 }
 
 type ForwardConfig struct {
-	mutex             *sync.Mutex
+	aliveConnMutex    *sync.RWMutex
 	ctx               context.Context
 	cancel            context.CancelFunc
 	User              string

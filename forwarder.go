@@ -53,11 +53,13 @@ func NewUnixRemote(localUnixSocket string, server string, remoteUnixSocket strin
 
 func defaultSSHTun(server string) *ForwardConfig {
 	return &ForwardConfig{
-		mutex:       &sync.Mutex{},
-		Server:      NewServerEndpoint(server, 22),
-		User:        "root",
-		timeout:     time.Second * 2,
-		forwardType: Remote,
+		aliveConnMutex:    &sync.RWMutex{},
+		Server:            NewServerEndpoint(server, 22),
+		User:              "root",
+		timeout:           time.Second * 2,
+		forwardType:       Remote,
+		connState:         func(_config *ForwardConfig, _state ConnState) {},
+		tunneledConnState: func(_config *ForwardConfig, _state *TunneledConnState) {},
 	}
 }
 
@@ -87,23 +89,14 @@ func (tun *ForwardConfig) initSSHConfig() (*ssh.ClientConfig, error) {
 
 // Stop closes all connections and makes Start exit `gracefully`.
 func (tun *ForwardConfig) Stop() {
-	tun.mutex.Lock()
-	defer tun.mutex.Unlock()
-
 	if tun.started {
 		tun.cancel()
 	}
 }
 
-func (tun *ForwardConfig) stop(err error) error {
-	tun.mutex.Lock()
+func (tun *ForwardConfig) notifyStop() {
 	tun.started = false
-	tun.mutex.Unlock()
-	if tun.connState != nil {
-		tun.connState(tun, StateStopped)
-	}
-
-	return err
+	tun.connState(tun, StateStopped)
 }
 
 // CleanTargetSocketFile delete the target socket file before forward
@@ -128,54 +121,42 @@ func (tun *ForwardConfig) CleanTargetSocketFile() error {
 }
 
 func (tun *ForwardConfig) Start(ctx context.Context) error {
-	tun.mutex.Lock()
 	if tun.started {
-		tun.mutex.Unlock()
 		return fmt.Errorf("already started")
 	}
 	tun.started = true
+
+	defer tun.notifyStop()
+	return tun.start(ctx)
+}
+
+func (tun *ForwardConfig) start(ctx context.Context) error {
 	tun.ctx, tun.cancel = context.WithCancel(ctx)
-	tun.mutex.Unlock()
 
 	config, err := tun.initSSHConfig()
 	if err != nil {
-		return tun.stop(fmt.Errorf("ssh config failed: %w", err))
+		return fmt.Errorf("ssh config failed: %w", err)
 	}
 	tun.SSHConfig = config
 
-	if tun.connState != nil {
-		tun.connState(tun, StateStarting)
-	}
+	tun.connState(tun, StateStarting)
 
 	var listener net.Listener
 
 	sshClient, err := ssh.Dial(tun.Server.Type(), tun.Server.String(), tun.SSHConfig)
 	if err != nil {
-		return tun.stop(fmt.Errorf("ssh dial %s to %s failed: %w", tun.Server.Type(), tun.Server.String(), err))
+		return fmt.Errorf("ssh dial %s to %s failed: %w", tun.Server.Type(), tun.Server.String(), err)
 	}
 
 	listener, err = sshClient.Listen(tun.Remote.Type(), tun.Remote.String())
 	if err != nil {
-		return tun.stop(fmt.Errorf("remote listen %s on %s failed: %w", tun.Remote.Type(), tun.Remote.String(), err))
+		return fmt.Errorf("remote listen %s on %s failed: %w", tun.Remote.Type(), tun.Remote.String(), err)
 	}
 	defer listener.Close()
 
-	errChan := make(chan error)
-	go func() {
-		errChan <- tun.listen(listener)
-	}()
+	tun.connState(tun, StateStarted)
 
-	if tun.connState != nil {
-		tun.connState(tun, StateStarted)
-	}
-
-	select {
-	case <-tun.ctx.Done():
-		err = context.Cause(tun.ctx)
-	case err = <-errChan:
-	}
-
-	return tun.stop(err)
+	return tun.listen(listener)
 }
 
 func (tun *ForwardConfig) listen(listener net.Listener) error {
@@ -185,8 +166,10 @@ func (tun *ForwardConfig) listen(listener net.Listener) error {
 		}
 
 		if conn, err := listener.Accept(); err == nil {
+			tun.addConn()
 			go func(conn net.Conn) {
-				_ = tun.handle(conn)
+				defer tun.removeConn()
+				tun.forward(conn)
 			}(conn)
 		}
 	}
@@ -200,37 +183,29 @@ func (tun *ForwardConfig) fromEndpoint() *Endpoint {
 	return tun.Local
 }
 
-func (tun *ForwardConfig) addConn() error {
-	tun.mutex.Lock()
-	defer tun.mutex.Unlock()
+func (tun *ForwardConfig) addConn() {
+	tun.aliveConnMutex.Lock()
+	defer tun.aliveConnMutex.Unlock()
+
 	tun.active += 1
-
-	return nil
-}
-
-func (tun *ForwardConfig) handle(conn net.Conn) error {
-	err := tun.addConn()
-	if err != nil {
-		return err
-	}
-
-	tun.forward(conn)
-	tun.removeConn()
-
-	return nil
 }
 
 func (tun *ForwardConfig) removeConn() {
-	tun.mutex.Lock()
-	defer tun.mutex.Unlock()
+	tun.aliveConnMutex.Lock()
+	defer tun.aliveConnMutex.Unlock()
 
 	tun.active -= 1
 }
 
+func (tun *ForwardConfig) GetAliveConnCount() int {
+	tun.aliveConnMutex.RLock()
+	defer tun.aliveConnMutex.RUnlock()
+
+	return tun.active
+}
+
 func (tun *ForwardConfig) tunneledState(state *TunneledConnState) {
-	if tun.tunneledConnState != nil {
-		tun.tunneledConnState(tun, state)
-	}
+	tun.tunneledConnState(tun, state)
 }
 
 func (tun *ForwardConfig) toEndpoint() *Endpoint {
@@ -265,15 +240,12 @@ func (tun *ForwardConfig) forward(fromConn net.Conn) {
 		Info: fmt.Sprintf("accepted %s connection", tun.fromEndpoint().Type()),
 	})
 
-	var toConn net.Conn
-	var err error
-
 	dialFunc := tun.SSHClient.Dial
 	if tun.forwardType == Remote {
 		dialFunc = net.Dial
 	}
 
-	toConn, err = dialFunc(tun.toEndpoint().Type(), tun.toEndpoint().String())
+	toConn, err := dialFunc(tun.toEndpoint().Type(), tun.toEndpoint().String())
 	if err != nil {
 		tun.tunneledState(&TunneledConnState{
 			From: from,
@@ -281,7 +253,7 @@ func (tun *ForwardConfig) forward(fromConn net.Conn) {
 				tun.toEndpoint().Type(), tun.toEndpoint().String(), err),
 		})
 
-		fromConn.Close()
+		_ = fromConn.Close()
 		return
 	}
 
@@ -317,21 +289,16 @@ func (tun *ForwardConfig) forward(fromConn net.Conn) {
 	})
 
 	<-connCtx.Done()
-	fromConn.Close()
-	toConn.Close()
+	_ = fromConn.Close()
+	_ = toConn.Close()
 
 	err = errGroup.Wait()
-
-	select {
-	case <-tun.ctx.Done():
-	default:
-		if err != nil {
-			tun.tunneledState(&TunneledConnState{
-				From:   from,
-				Error:  err,
-				Closed: true,
-			})
-		}
+	if err != nil {
+		tun.tunneledState(&TunneledConnState{
+			From:   from,
+			Error:  err,
+			Closed: true,
+		})
 	}
 
 	tun.tunneledState(&TunneledConnState{
