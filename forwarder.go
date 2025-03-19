@@ -152,7 +152,14 @@ func (tun *ForwardConfig) start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("remote listen %s on %s failed: %w", tun.Remote.Type(), tun.Remote.String(), err)
 	}
-	defer listener.Close()
+
+	context.AfterFunc(ctx, func() {
+		_ = listener.Close()
+	})
+
+	defer func() {
+		_ = listener.Close()
+	}()
 
 	tun.connState(tun, StateStarted)
 
