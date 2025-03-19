@@ -155,7 +155,6 @@ func (tun *ForwardConfig) Start(ctx context.Context) error {
 	}
 
 	listener, err = sshClient.Listen(tun.Remote.Type(), tun.Remote.String())
-	defer listener.Close()
 	if err != nil {
 		return tun.stop(fmt.Errorf("remote listen %s on %s failed: %w", tun.Remote.Type(), tun.Remote.String(), err))
 	}
