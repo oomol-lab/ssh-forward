@@ -158,6 +158,7 @@ func (tun *ForwardConfig) Start(ctx context.Context) error {
 	if err != nil {
 		return tun.stop(fmt.Errorf("remote listen %s on %s failed: %w", tun.Remote.Type(), tun.Remote.String(), err))
 	}
+	defer listener.Close()
 
 	errChan := make(chan error)
 	go func() {
@@ -184,9 +185,9 @@ func (tun *ForwardConfig) listen(listener net.Listener) error {
 		}
 
 		if conn, err := listener.Accept(); err == nil {
-			go func() {
+			go func(conn net.Conn) {
 				_ = tun.handle(conn)
-			}()
+			}(conn)
 		}
 	}
 }
