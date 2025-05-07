@@ -24,11 +24,6 @@ func main() {
 		switch state {
 		case forwarder.StateStarting:
 			logrus.Infoln("STATE is Starting")
-			logrus.Infof("Clean target socket file: %q", myForwarder.Remote.String())
-			err := myForwarder.CleanTargetSocketFile()
-			if err != nil {
-				logrus.Errorf("CleanOldSocksFile err:%v", err)
-			}
 		case forwarder.StateStarted:
 			logrus.Infoln("STATE is Started")
 		case forwarder.StateStopped:

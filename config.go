@@ -12,6 +12,10 @@ import (
 type ForwardType int
 
 const (
+	// Remote In this context, "Remote" represents the "remote forwarding" mode.
+	// In other words, in this mode, the remote host listens for incoming connections
+	// or data and then forwards them through an SSH tunnel to the local host,
+	// effectively achieving reverse port or socket forwarding.
 	Remote ForwardType = iota
 )
 
