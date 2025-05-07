@@ -44,7 +44,8 @@ func NewUnixEndpoint(socket string) *Endpoint {
 	}
 }
 
-// NewUnixRemote does the same as NewRemote but using unix sockets.
+// NewUnixRemote does the same as NewRemote but using unix sockets.The remote host listens for incoming connections
+// or data and then forwards them through an SSH tunnel to the localhost.
 func NewUnixRemote(localUnixSocket string, server string, remoteUnixSocket string) *ForwardConfig {
 	sshTun := NewUnix(localUnixSocket, server, remoteUnixSocket)
 	sshTun.forwardType = Remote
@@ -100,7 +101,7 @@ func (tun *ForwardConfig) notifyStop() {
 }
 
 // CleanTargetSocketFile delete the target socket file before forward
-func (tun *ForwardConfig) CleanTargetSocketFile() error {
+func (tun *ForwardConfig) cleanTargetSocketFile() error {
 	sshClient, err := ssh.Dial(tun.Server.Type(), tun.Server.String(), tun.SSHConfig)
 	if err != nil {
 		return fmt.Errorf("SSH Dial Error: %v", err)
@@ -138,8 +139,12 @@ func (tun *ForwardConfig) start(ctx context.Context) error {
 		return fmt.Errorf("ssh config failed: %w", err)
 	}
 	tun.SSHConfig = config
-
 	tun.connState(tun, StateStarting)
+
+	// Delete remote socks file first
+	if err = tun.cleanTargetSocketFile(); err != nil {
+		return fmt.Errorf("clean remote socket file failed: %w", err)
+	}
 
 	var listener net.Listener
 
